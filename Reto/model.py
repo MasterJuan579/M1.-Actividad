@@ -17,11 +17,10 @@ class TrafficModel(Model):
         self.num_vehicles = num_vehicles
         self.step_count = 0
         
-        # UPGRADE: 25x25 Grid
+        # 25x25 Grid
         self.space = ContinuousSpace(x_max=25, y_max=25, torus=False)
         self.agents_list = [] 
         
-        # UPGRADE: 25x25 Matrix
         self.city_layout = [[BUILDING for y in range(25)] for x in range(25)]
         self.graph = nx.DiGraph()
         self.parking_spots = {} 
@@ -30,12 +29,11 @@ class TrafficModel(Model):
         self.build_city_graph()
         
         # --- AGENT PLACEMENT ---
-        # Updated coordinates for the larger map (Max X=24, Max Y=24)
         light_configs = [
-            (12, 0, "GREEN"), (12, 1, "GREEN"), # Top Road
-            (0, 12, "RED"),   (1, 12, "RED"),   # Left Road
-            (12, 24, "GREEN"),(12, 23, "GREEN"),# Bottom Road (Moved to y=24/23)
-            (24, 12, "RED"),  (23, 12, "RED")   # Right Road (Moved to x=24/23)
+            (12, 0, "GREEN"), (12, 1, "GREEN"), # Top
+            (0, 12, "RED"),   (1, 12, "RED"),   # Left
+            (12, 24, "GREEN"),(12, 23, "GREEN"),# Bottom
+            (24, 12, "RED"),  (23, 12, "RED")   # Right
         ]
         
         for (x, y, state) in light_configs:
@@ -46,12 +44,11 @@ class TrafficModel(Model):
             self.agents_list.append(tl_agent)
             self.traffic_lights.append(tl_agent)
 
-        # Updated Parking Spots
         self.parking_spots = {
             1: (12, 1),   # Top Inner
             2: (1, 12),   # Left Inner
-            3: (12, 23),  # Bottom Inner (Moved to y=23)
-            4: (23, 12)   # Right Inner (Moved to x=23)
+            3: (12, 23),  # Bottom Inner
+            4: (23, 12)   # Right Inner
         }
         
         parking_ids = list(self.parking_spots.keys())
@@ -116,7 +113,6 @@ class TrafficModel(Model):
                 next_y = curr[1] + direction[1]
                 node_next = (next_x, next_y)
                 
-                # Update Bounds Check for 25x25
                 if not (0 <= next_x < 25 and 0 <= next_y < 25):
                     break
 
@@ -129,51 +125,91 @@ class TrafficModel(Model):
 
                 curr[0], curr[1] = next_x, next_y
 
-        # ================= OUTER RING (Perimeter 0/24) =================
-        # 1. Top Outer (y=0) -> Flows Left (From 24 to 0)
-        add_line((24, 0), (0, 0), (-1, 0), weight=1)
-        
-        # 2. Left Outer (x=0) -> Flows Down (From 0 to 24)
-        add_line((0, 0), (0, 24), (0, 1), weight=1)
-        
-        # 3. Bottom Outer (y=24) -> Flows Right (From 0 to 24)
-        add_line((0, 24), (24, 24), (1, 0), weight=1)
-        
-        # 4. Right Outer (x=24) -> Flows Up (From 24 to 0)
-        add_line((24, 24), (24, 0), (0, -1), weight=1)
+        # ================= PERIMETER (2 Lanes) =================
+        add_line((24, 0), (0, 0), (-1, 0)) # Top Outer
+        add_line((23, 1), (1, 1), (-1, 0)) # Top Inner
+        add_line((0, 0), (0, 24), (0, 1))  # Left Outer
+        add_line((1, 1), (1, 23), (0, 1))  # Left Inner
+        add_line((0, 24), (24, 24), (1, 0)) # Bottom Outer
+        add_line((1, 23), (23, 23), (1, 0)) # Bottom Inner
+        add_line((24, 24), (24, 0), (0, -1)) # Right Outer
+        add_line((23, 23), (23, 1), (0, -1)) # Right Inner
 
-
-        # ================= INNER RING (Perimeter 1/23) =================
-        # 1. Top Inner (y=1) -> Flows Left (From 23 to 1)
-        add_line((23, 1), (1, 1), (-1, 0), weight=1)
-        
-        # 2. Left Inner (x=1) -> Flows Down (From 1 to 23)
-        add_line((1, 1), (1, 23), (0, 1), weight=1)
-        
-        # 3. Bottom Inner (y=23) -> Flows Right (From 1 to 23)
-        add_line((1, 23), (23, 23), (1, 0), weight=1)
-        
-        # 4. Right Inner (x=23) -> Flows Up (From 23 to 1)
-        add_line((23, 23), (23, 1), (0, -1), weight=1)
-
-
-        # ================= LANE CONNECTIONS (The Ladder) =================
-        
-        # Top Road: Merge In/Out
-        self.graph.add_edge((12, 0), (11, 1), weight=3) 
-        self.graph.add_edge((12, 1), (11, 0), weight=3) 
-        
-        # Left Road: Merge In/Out
+        # Perimeter Merges
+        self.graph.add_edge((12, 0), (11, 1), weight=3)
+        self.graph.add_edge((12, 1), (11, 0), weight=3)
         self.graph.add_edge((0, 12), (1, 13), weight=3)
         self.graph.add_edge((1, 12), (0, 13), weight=3)
-        
-        # Bottom Road (Updated Y to 24/23)
         self.graph.add_edge((12, 24), (13, 23), weight=3)
         self.graph.add_edge((12, 23), (13, 24), weight=3)
-        
-        # Right Road (Updated X to 24/23)
         self.graph.add_edge((24, 12), (23, 11), weight=3)
         self.graph.add_edge((23, 12), (24, 11), weight=3)
+
+        # Perimeter Corners
+        self.graph.add_edge((24, 0), (23, 0), weight=1)
+        self.graph.add_edge((23, 0), (23, 1), weight=1)
+        self.graph.add_edge((1, 1), (1, 2), weight=1)
+        self.graph.add_edge((1, 23), (2, 23), weight=1)
+        self.graph.add_edge((23, 23), (23, 22), weight=1)
+
+
+        # ================= NEW: ROUNDABOUT RING (Corridor) =================
+        # 1. North Corridor (y=8): Flows Left (12->8)
+        add_line((12, 8), (8, 8), (-1, 0))
+        
+        # 2. West Corridor (x=8): Flows Down (8->12)
+        add_line((8, 8), (8, 12), (0, 1))
+        
+        # 3. South Corridor (y=12): Flows Right (8->12)
+        add_line((8, 12), (12, 12), (1, 0))
+        
+        # 4. East Corridor (x=12): Flows Up (12->8)
+        add_line((12, 12), (12, 8), (0, -1))
+        
+        # Connect Corners to make it a loop
+        self.graph.add_edge((8, 8), (8, 9), weight=1)   # Top-Left turn
+        self.graph.add_edge((8, 12), (9, 12), weight=1) # Bottom-Left turn
+        self.graph.add_edge((12, 12), (12, 11), weight=1) # Bottom-Right turn
+        self.graph.add_edge((12, 8), (11, 8), weight=1)   # Top-Right turn
+
+        # Paint the Brown Center
+        for x in range(9, 12):
+            for y in range(9, 12):
+                self.city_layout[x][y] = ROUNDABOUT
+
+
+        # ================= TOP INTERNAL ROAD (2 Lanes) =================
+        
+        # 1. Down Lane (x=11): Flows INTO Roundabout
+        # Starts at (11, 1) -> Ends at (11, 8)
+        add_line((11, 1), (11, 8), (0, 1))
+        
+        # 2. Up Lane (x=12): Flows OUT of Roundabout
+        # Starts at (12, 8) -> Ends at (12, 1)
+        add_line((12, 8), (12, 1), (0, -1))
+        
+        
+        # ================= CONNECTIONS: Top Road <-> Roundabout =================
+        
+        # A. Entering Roundabout (Down Lane)
+        # Car arrives at (11, 8) on the North Corridor.
+        # It merges with the Leftward flow of the ring.
+        # Flow on ring is (12,8)->(11,8)->(10,8).
+        # Our Down Lane ends at (11,8). 
+        # So we connect (11,8) -> (10,8) is already implied by the Ring.
+        # But we need to ensure the Down Lane node connects to the Ring node.
+        # Since they are the SAME coordinate, they are connected automatically!
+        
+        # B. Exiting Roundabout (Up Lane)
+        # Car is at (12, 8) (Top-Right corner of Ring).
+        # Choice 1: Turn Left (Continue on Ring) -> (11, 8) [Existing Edge]
+        # Choice 2: Turn Up (Exit to Top Road) -> (12, 7)
+        self.graph.add_edge((12, 8), (12, 7), weight=1)
+
+
+        # ================= CONNECTIONS: Top Road <-> Perimeter =================
+        self.graph.add_edge((11, 1), (11, 2), weight=1) # Enter City
+        self.graph.add_edge((12, 1), (11, 1), weight=1) # Exit City (Merge Left)
 
 
         # ================= PARKING SPOTS =================
