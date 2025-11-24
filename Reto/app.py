@@ -2,13 +2,11 @@ from mesa.visualization import SolaraViz, SpaceRenderer, make_plot_component
 from mesa.visualization.components import AgentPortrayalStyle
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from model import TrafficModel
+from model import TrafficModel, BUILDING, ROAD, ROUNDABOUT, PARKING
 from agents import VehicleAgent, TrafficLightAgent
 
-# 1. Define how agents look (The Portrayal)
 def traffic_portrayal(agent):
-    if agent is None:
-        return
+    if agent is None: return
 
     portrayal = AgentPortrayalStyle(
         size=50,
@@ -17,27 +15,21 @@ def traffic_portrayal(agent):
     )
 
     if isinstance(agent, TrafficLightAgent):
-        # Traffic Lights as Squares (Blocks)
         portrayal.update(("marker", "s"), ("size", 180), ("zorder", 3))
-        
-        # Color logic
         if agent.state == "GREEN":
-            portrayal.update(("color", "#00AA00")) # Bright Green
+            portrayal.update(("color", "#00AA00"))
         elif agent.state == "YELLOW":
-            portrayal.update(("color", "#FFD700")) # Gold
+            portrayal.update(("color", "#FFD700"))
         else:
-            portrayal.update(("color", "#CC0000")) # Red
+            portrayal.update(("color", "#CC0000"))
             
     elif isinstance(agent, VehicleAgent):
-        # Cars as Circles
         portrayal.update(("color", "black"), ("size", 70), ("zorder", 4))
-        # Change color if stopped
         if agent.speed < 0.01:
-             portrayal.update(("color", "gray")) # Gray if stopped
+             portrayal.update(("color", "gray"))
 
     return portrayal
 
-# 2. Model Parameters
 model_params = {
     "num_vehicles": {
         "type": "SliderInt",
@@ -49,44 +41,37 @@ model_params = {
     }
 }
 
-# 3. Custom Map Drawing (The City Blocks)
 def post_process_map(ax):
-    # Setup grid
     ax.set_aspect("equal")
-    ax.set_xlim(-0.5, 23.5)
-    ax.set_ylim(-0.5, 23.5)
-    ax.invert_yaxis() # Invert Y so (0,0) is top-left
+    # UPGRADE: Extend limits to 25
+    ax.set_xlim(-0.5, 24.5)
+    ax.set_ylim(-0.5, 24.5)
+    ax.invert_yaxis() 
     
-    # Hide axis numbers (optional)
-    ax.set_xticks([])
-    ax.set_yticks([])
+    ax.figure.set_size_inches(10, 10)
     
-    # We create a temporary instance to read the map data
+    # UPGRADE: Show ticks 0-24
+    ax.set_xticks(range(25))
+    ax.set_yticks(range(25))
+    ax.xaxis.tick_top()
+    ax.grid(color='white', linestyle='-', linewidth=0.2, alpha=0.5)
+    
     temp_model = TrafficModel(num_vehicles=0)
+    layout = temp_model.city_layout
     
-    # DRAW THE GRID
-    for x in range(24):
-        for y in range(24):
-            pos = (x, y)
+    colors = {
+        BUILDING: "#4682B4",   
+        ROAD: "#D3D3D3",       
+        ROUNDABOUT: "#8B4513", 
+        PARKING: "#FFD700"     
+    }
+
+    # UPGRADE: Loop 0-24
+    for x in range(25):
+        for y in range(25):
+            cell_type = layout[x][y]
+            color = colors[cell_type]
             
-            # DEFAULT: Building (Blue)
-            color = "#4682B4" # SteelBlue
-            
-            # CHECK: Parking Spot (Yellow)
-            if pos in temp_model.parking_spots.values():
-                color = "#FFD700" # Gold
-            
-            # CHECK: Roundabout (Brown Area)
-            # Coordinates approx 10-13 horizontal, 9-12 vertical based on image
-            elif 10 <= x <= 13 and 9 <= y <= 12:
-                color = "#8B4513" # SaddleBrown
-                
-            # CHECK: Road (Light Gray)
-            # If it's a node in the graph, it's a road
-            elif pos in temp_model.graph.nodes:
-                color = "#D3D3D3" # LightGray
-            
-            # Draw the cell
             rect = patches.Rectangle(
                 (x - 0.5, y - 0.5), 1, 1, 
                 facecolor=color, 
@@ -96,12 +81,10 @@ def post_process_map(ax):
             )
             ax.add_patch(rect)
 
-# 4. Plots
 lineplot_component = make_plot_component(
     {"Stopped_Cars": "tab:red", "Average_Speed": "tab:blue"},
 )
 
-# 5. Instantiate
 traffic_model = TrafficModel()
 
 renderer = SpaceRenderer(
