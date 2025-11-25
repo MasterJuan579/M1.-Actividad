@@ -5,6 +5,7 @@ from matplotlib.collections import PatchCollection
 from matplotlib.figure import Figure
 import numpy as np
 import time
+import asyncio  # <--- IMPORTANTE: Importar asyncio para la ejecución no bloqueante
 
 from model import TrafficModel, BUILDING, ROAD, ROUNDABOUT, PARKING
 from agents import VehicleAgent, TrafficLightAgent
@@ -59,7 +60,9 @@ def create_city_visualization(model: TrafficModel) -> Figure:
     for x in range(GRID_WIDTH):
         for y in range(GRID_HEIGHT):
             cell_type = CITY_LAYOUT[x][y]
-            rect = patches.Rectangle((x - 0.5, y - 0.5), 1, 1)
+            # CORRECCIÓN: Usar (x, y) directamente en lugar de restar 0.5
+            # Esto alinea el cuadro gris con el sistema de coordenadas de Mesa
+            rect = patches.Rectangle((x, y), 1, 1)
             rects.append(rect)
             colors.append(COLOR_MAP[cell_type])
 
@@ -69,14 +72,17 @@ def create_city_visualization(model: TrafficModel) -> Figure:
     # 2. DRAW PARKING
     for pid, pos in model.parking_spots.items():
         px, py = pos
-        border = patches.Rectangle((px - 0.5, py - 0.5), 1, 1, linewidth=2, edgecolor='black', facecolor='none', zorder=5)
+        # Ajustamos el borde del parking para que coincida con la nueva cuadrícula
+        border = patches.Rectangle((px, py), 1, 1, linewidth=2, edgecolor='black', facecolor='none', zorder=5)
         ax.add_patch(border)
-        ax.text(px, py, "P", color='black', fontsize=10, ha='center', va='center', fontweight='bold', zorder=6)
+        # Ajustamos el texto para que esté en el centro (x+0.5, y+0.5)
+        ax.text(px + 0.5, py + 0.5, "P", color='black', fontsize=10, ha='center', va='center', fontweight='bold', zorder=6)
 
     # 3. DRAW AGENTS
     vehicle_count = 0
     
     for agent in model.agents_list:
+        # Mesa guarda posiciones como (float, float). Ej: (12.5, 3.5)
         x, y = agent.pos
         
         if isinstance(agent, VehicleAgent):
@@ -85,7 +91,8 @@ def create_city_visualization(model: TrafficModel) -> Figure:
             if agent.speed < 0.01:
                 color = AGENT_COLORS["stopped"]
             
-            circle = patches.Circle((x, y), radius=0.4, facecolor=color, edgecolor='white', linewidth=1, zorder=15)
+            # El coche ya está en x.5, y.5, así que se dibuja en el centro correctamente
+            circle = patches.Circle((x, y), radius=0.35, facecolor=color, edgecolor='white', linewidth=1, zorder=15)
             ax.add_patch(circle)
             
         elif isinstance(agent, TrafficLightAgent):
@@ -93,23 +100,33 @@ def create_city_visualization(model: TrafficModel) -> Figure:
             elif agent.state == "YELLOW": c = AGENT_COLORS["light_yellow"]
             else: c = AGENT_COLORS["light_red"]
             
-            # VISUAL TRICK: Overlap them slightly so adjacent lights look like one block
+            # El semáforo está en (x.5, y.5).
+            # Para llenar la celda, restamos 0.5 para obtener la esquina inferior izquierda (x.0, y.0)
             rect = patches.Rectangle(
                 (x - 0.5, y - 0.5), 
                 1.0, 1.0, 
                 facecolor=c, 
                 edgecolor='none', 
+                alpha=0.6, # Hacemos los semáforos un poco transparentes
                 zorder=20
             )
             ax.add_patch(rect)
 
     ax.set_aspect("equal")
-    ax.set_xlim(-0.5, 24.5)
-    ax.set_ylim(-0.5, 24.5)
-    ax.invert_yaxis()
-    ax.set_xticks(range(25))
-    ax.set_yticks(range(25))
-    ax.xaxis.tick_top()
+    
+    # CORRECCIÓN: Ajustar los límites de 0 a 25 exactos
+    ax.set_xlim(0, 25)
+    ax.set_ylim(0, 25)
+    
+    ax.invert_yaxis() # Mantiene el (0,0) arriba a la izquierda visualmente
+    
+    # Ajustar etiquetas de ejes para que se vean limpias
+    ax.set_xticks(np.arange(0.5, 25.5, 1))
+    ax.set_yticks(np.arange(0.5, 25.5, 1))
+    ax.set_xticklabels(range(25))
+    ax.set_yticklabels(range(25))
+    ax.tick_params(left=False, bottom=False, labeltop=True, labelbottom=False)
+    
     ax.set_title(f"Step: {current_step.value} | Vehicles: {vehicle_count}", fontsize=14)
     
     return fig
@@ -133,12 +150,28 @@ def TrafficSimulation():
     if model_state.value is None:
         initialize_model()
 
-    def run_loop():
-        while is_playing.value:
-            step_model()
-            time.sleep(play_speed.value)
-    
-    solara.use_effect(run_loop, [is_playing.value])
+    # Definimos el efecto de forma SÍNCRONA
+    def run_loop_effect():
+        # Definimos la lógica asíncrona dentro
+        async def loop_logic():
+            while is_playing.value:
+                step_model()
+                await asyncio.sleep(play_speed.value)
+
+        # Si está reproduciendo, creamos la tarea en segundo plano
+        if is_playing.value:
+            task = asyncio.create_task(loop_logic())
+            
+            # Devolvemos una función de limpieza para cancelar la tarea
+            # si el usuario pausa o cambia de página.
+            def cleanup():
+                task.cancel()
+            return cleanup
+            
+        return None # No hay nada que limpiar si no está reproduciendo
+
+    # Pasamos la función síncrona al use_effect
+    solara.use_effect(run_loop_effect, [is_playing.value])
 
     with solara.Sidebar():
         solara.Markdown("## 🎮 Controls")

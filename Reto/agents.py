@@ -2,52 +2,44 @@ from mesa import Agent
 import numpy as np
 
 class TrafficLightAgent(Agent):
-    def __init__(self, unique_id, model, direction):
-        # MESA 3.0 FIX: Only pass 'model' to the parent constructor
-        super().__init__(model) 
-        # Set unique_id explicitly
+    def __init__(self, unique_id, model, controller, group_id):
+        super().__init__(model)
         self.unique_id = unique_id
         
-        self.direction = direction
-        self.state = "YELLOW"
-        self.time_remaining = 0
+        # Referencia al cerebro de la intersección
+        self.controller = controller 
+        # ID del grupo (ej: 0 para Norte/Sur, 1 para Este/Oeste)
+        self.group_id = group_id 
+
+    @property
+    def state(self):
+        # Le pregunta al controlador: "¿Cómo está mi grupo ahora?"
+        return self.controller.get_state(self.group_id)
+    
+    # Para compatibilidad con la visualización, necesitamos que 'state' sea asignable
+    # aunque en realidad no lo usaremos para cambiar lógica interna, sino para el dibujo
+    @state.setter
+    def state(self, value):
+        pass # El estado es controlado externamente, ignoramos asignaciones directas
 
     def step(self):
-        # (Same logic: Manage timers)
-        if self.state == "GREEN":
-            self.time_remaining -= 1
-            if self.time_remaining <= 0:
-                self.state = "YELLOW"
-                self.time_remaining = 3
-        elif self.state == "YELLOW":
-            if self.time_remaining > 0:
-                self.time_remaining -= 1
-                if self.time_remaining <= 0:
-                    self.state = "RED"
-                    self.time_remaining = 30
-        elif self.state == "RED":
-            self.time_remaining -= 1
-            if self.time_remaining <= 0:
-                self.state = "YELLOW"
-                self.time_remaining = 0
-    
+        # El agente semáforo ya no piensa.
+        # El modelo se encarga de avanzar el tiempo del controlador globalmente.
+        pass 
+
     def advance(self):
         pass
 
     def receive_eta(self, vehicle_id, eta):
-        if self.state == "YELLOW" and self.time_remaining == 0:
-            if eta < 10:
-                print(f"Light {self.unique_id}: Green triggered by Vehicle {vehicle_id}")
-                self.state = "GREEN"
-                self.time_remaining = 30
+        # Enviamos la señal al controlador para que decida si acelera el cambio
+        self.controller.register_car_arrival(self.group_id, eta)
+
 
 class VehicleAgent(Agent):
+    # ... (El código del Vehículo se mantiene IGUAL que antes)
     def __init__(self, unique_id, model, start_node, destination_node):
-        # MESA 3.0 FIX: Only pass 'model' to the parent constructor
         super().__init__(model)
-        # Set unique_id explicitly
         self.unique_id = unique_id
-        
         self.start = start_node
         self.destination = destination_node
         self.velocity = np.array([0.0, 0.0])
@@ -72,8 +64,12 @@ class VehicleAgent(Agent):
         target_speed = self.max_speed
         if traffic_light:
             dist = self.model.space.get_distance(self.pos, traffic_light.pos)
+            
+            # Avisamos al semáforo (que avisará al controlador)
             if self.speed > 0:
                 traffic_light.receive_eta(self.unique_id, dist / self.speed)
+            
+            # Leemos el estado (que viene del controlador)
             if traffic_light.state == "RED": target_speed = 0
             elif traffic_light.state == "YELLOW": target_speed = self.max_speed * 0.5
         
