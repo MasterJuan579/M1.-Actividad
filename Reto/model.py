@@ -43,10 +43,14 @@ class TrafficModel(Model):
             self.traffic_lights.append(tl_agent)
 
         self.parking_spots = {
-            1: (12, 1),   
-            2: (1, 12),   
-            3: (12, 23),  
-            4: (23, 12)   
+            1: (21, 2),   
+            2: (22, 16),   
+            3: (15, 22),  
+            4: (4, 22),   
+            5: (21, 22),   
+            6: (13, 19),   
+            7: (20, 13),
+            8: (3, 13),
         }
         
         parking_ids = list(self.parking_spots.keys())
