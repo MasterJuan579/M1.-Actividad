@@ -178,7 +178,7 @@ def TrafficSimulation():
             solara.Button("▶️ Play", color="success", on_click=lambda: is_playing.set(True), block=True)
         solara.Button("⏭️ Step +1", color="info", on_click=step_model, disabled=is_playing.value, block=True)
         solara.SliderFloat("Speed", value=play_speed, min=0.01, max=1.0, step=0.05)
-        solara.SliderInt("Vehicles", value=num_vehicles_param, min=1, max=20)
+        solara.SliderInt("Vehicles", value=num_vehicles_param, min=1, max=50)
         StatisticsPanel()
 
     with solara.Column(style={"padding": "20px", "align-items": "center"}):

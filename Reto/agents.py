@@ -2,90 +2,64 @@ from mesa import Agent
 import numpy as np
 
 class TrafficManagerAgent(Agent):
-    """
-    Agente 'Cerebro' que controla un grupo de semáforos lógicos.
-    No tiene posición física en el mapa, solo gestiona el tiempo y la lógica de relevos.
-    """
+    """Agente Cerebro (Sin cambios)"""
     def __init__(self, unique_id, model, green_time=20, yellow_time=4):
         super().__init__(model)
         self.unique_id = unique_id
-        
-        # Configuración de tiempos
         self.green_time = green_time
         self.yellow_time = yellow_time
-        
-        # Estado inicial
         self.state = "RED"
         self.time_remaining = 0
-        
-        # Referencia al siguiente manager en la cadena
         self.next_manager = None 
 
     def set_next(self, manager_agent):
-        """Conecta este gestor con el siguiente en la cadena de relevos"""
         self.next_manager = manager_agent
 
     def activate(self):
-        """Inicia el ciclo de verde para este gestor"""
         self.state = "GREEN"
         self.time_remaining = self.green_time
 
     def step(self):
-        # Máquina de estados finitos basada en tiempo
         if self.state == "GREEN":
             self.time_remaining -= 1
             if self.time_remaining <= 0:
                 self.state = "YELLOW"
                 self.time_remaining = self.yellow_time
-                
         elif self.state == "YELLOW":
             self.time_remaining -= 1
             if self.time_remaining <= 0:
                 self.state = "RED"
-                # Terminó mi turno, activo al siguiente en la cadena
                 if self.next_manager:
                     self.next_manager.activate()
-        
-        # Si está en RED, espera pasivamente a ser activado por el anterior
 
 class TrafficLightAgent(Agent):
-    """
-    Agente físico que representa una celda de semáforo en el grid.
-    No piensa, solo refleja el estado de su TrafficManagerAgent asignado.
-    """
+    """Agente Cuerpo Físico (Sin cambios)"""
     def __init__(self, unique_id, model, manager):
         super().__init__(model)
         self.unique_id = unique_id
-        self.manager = manager # Referencia al agente gestor (cerebro)
+        self.manager = manager
 
     @property
     def state(self):
-        # Refleja dinámicamente el estado del manager
         return self.manager.state
     
     @state.setter
     def state(self, value):
-        # Ignoramos intentos externos de cambiar el estado directamente
         pass
 
     def step(self):
-        # No hace nada, la lógica está en el Manager
         pass
 
     def receive_eta(self, vehicle_id, eta):
-        # Método para compatibilidad con el vehículo. 
-        # En este modelo de relevos fijos por tiempo, no usamos el ETA, 
-        # pero el método debe existir para que el coche no falle al llamarlo.
         pass
 
 class VehicleAgent(Agent):
     """
-    Agente vehículo que se mueve por el grid siguiendo una ruta.
+    Agente vehículo con Visión de Largo Alcance y Frenado Progresivo
     """
     def __init__(self, unique_id, model, start_node, destination_node):
         super().__init__(model)
         self.unique_id = unique_id
-        
         self.start = start_node
         self.destination = destination_node
         self.velocity = np.array([0.0, 0.0])
@@ -96,63 +70,99 @@ class VehicleAgent(Agent):
         self.state = "DRIVING"
 
     def step(self):
-        # 1. Percepción: Buscar vecinos (coches o semáforos)
-        neighbors = self.model.space.get_neighbors(self.pos, radius=2, include_center=False)
-        obstacle_ahead = False
+        if self.state == "ARRIVED":
+            return
+
+        # 1. Percepción: Aumentamos el radio a 2.5 para ver hasta 2 celdas adelante
+        neighbors = self.model.space.get_neighbors(self.pos, radius=2.5, include_center=False)
+        
+        obstacle_ahead = False      # Para frenado suave (lejos)
+        emergency_brake = False     # Para frenado seco (cerca)
         traffic_light = None
         
+        next_step_pos = self.path[0] if self.path else None
+        current_pos = np.array(self.pos)
+        
         for agent in neighbors:
+            # --- DETECCIÓN DE COCHES ---
             if isinstance(agent, VehicleAgent):
-                # Distancia de seguridad con otros coches
-                if self.model.space.get_distance(self.pos, agent.pos) < 1.0:
-                    obstacle_ahead = True
-            elif isinstance(agent, TrafficLightAgent):
-                traffic_light = agent
+                if agent.state == "ARRIVED": continue
 
-        # 2. Decisión: Calcular velocidad objetivo
+                other_pos = np.array(agent.pos)
+                dist = np.linalg.norm(other_pos - current_pos)
+                
+                # Verificamos si el coche está REALMENTE enfrente (Dirección)
+                is_in_front = False
+                if next_step_pos is not None:
+                    my_direction = np.array(next_step_pos) - current_pos
+                    vector_to_other = other_pos - current_pos
+                    if np.dot(my_direction, vector_to_other) > 0:
+                        is_in_front = True
+
+                if is_in_front:
+                    # ETAPA 1: Coche muy cerca (< 0.9) -> Frenado de Emergencia
+                    if dist < 0.9:
+                        emergency_brake = True
+                        obstacle_ahead = True # También cuenta como obstáculo
+                    
+                    # ETAPA 2: Coche a distancia media (< 1.9) -> Frenado Suave
+                    elif dist < 1.9:
+                        obstacle_ahead = True
+            
+            # --- DETECCIÓN DE SEMÁFOROS ---
+            elif isinstance(agent, TrafficLightAgent):
+                if next_step_pos is not None:
+                    dist_to_light = self.model.space.get_distance(agent.pos, next_step_pos)
+                    if dist_to_light < 0.1:
+                        traffic_light = agent
+
+        # --- LÓGICA DE MOVIMIENTO ---
         target_speed = self.max_speed
         
-        # Reglas de semáforos
+        # 1. Semáforos
         if traffic_light:
-            # Enviamos ETA (aunque el semáforo actual lo ignore, es buena práctica mantenerlo)
-            dist = self.model.space.get_distance(self.pos, traffic_light.pos)
-            if self.speed > 0:
-                traffic_light.receive_eta(self.unique_id, dist / self.speed)
-            
-            # Reaccionar al color que dicta el Manager a través del agente
-            if traffic_light.state == "RED": 
+            if traffic_light.state == "RED":
                 target_speed = 0
-            elif traffic_light.state == "YELLOW": 
+                self.speed = 0  # Semáforo rojo siempre es parada total
+            elif traffic_light.state == "YELLOW":
                 target_speed = self.max_speed * 0.5
         
-        # Reglas de colisión
+        # 2. Obstáculos (Coches)
         if obstacle_ahead:
             target_speed = 0
             self.state = "BRAKING"
+            # Si hay emergencia (muy cerca), paramos en seco.
+            # Si solo es obstáculo lejano, dejamos que la física frene suavemente.
+            if emergency_brake:
+                self.speed = 0 
         
-        # 3. Acción: Actualizar física (Aceleración/Frenado suave)
-        if self.speed < target_speed: 
+        # 3. Aceleración / Desaceleración Física
+        if target_speed > self.speed:
             self.speed += self.acceleration
-        elif self.speed > target_speed: 
+        elif target_speed < self.speed:
             self.speed -= self.acceleration
             
         if self.speed < 0: 
             self.speed = 0
 
     def advance(self):
-        # Movimiento físico siguiendo la ruta (path)
+        if self.state == "ARRIVED":
+            return
+
         if self.speed > 0 and self.path:
             target = self.path[0]
             current = np.array(self.pos)
             direction = np.array(target) - current
             dist = np.linalg.norm(direction)
             
-            # Si estamos muy cerca del nodo objetivo, "saltamos" a él y pasamos al siguiente
             if dist < self.speed:
                 new_pos = target
                 self.path.pop(0)
+                self.model.space.move_agent(self, tuple(new_pos))
+
+                if not self.path:
+                    self.state = "ARRIVED"
+                    self.model.space.remove_agent(self)
             else:
-                # Movimiento normal por vector
                 new_pos = current + (direction / dist) * self.speed
-            
-            self.model.space.move_agent(self, tuple(new_pos))
+                self.model.space.move_agent(self, tuple(new_pos))
