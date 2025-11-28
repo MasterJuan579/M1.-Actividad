@@ -12,7 +12,7 @@ ROUNDABOUT = 2
 PARKING = 3
 
 class TrafficModel(Model):
-    def __init__(self, num_vehicles=50): 
+    def __init__(self, num_vehicles=100): 
         super().__init__()
         self.num_vehicles = num_vehicles 
         self.vehicles_spawned = 0        
@@ -41,8 +41,7 @@ class TrafficModel(Model):
         # --- GRUPO 1: Intersección Izquierda/Arriba ---
         m1_1 = TrafficManagerAgent("Manager1.1", self, green_time=20)
         m1_2 = TrafficManagerAgent("Manager1.2", self, green_time=20)
-        m1_3 = TrafficManagerAgent("Manager1.3", self, green_time=20)
-        m1_1.set_next(m1_2); m1_2.set_next(m1_3); m1_3.set_next(m1_1)
+        m1_1.set_next(m1_2); m1_2.set_next(m1_1);
         m1_1.activate()
         
         # --- GRUPO 2: Intersección Abajo/Derecha ---
@@ -58,29 +57,28 @@ class TrafficModel(Model):
         m3_1.activate()
         
         # --- GRUPO 4: Intersección Central/Compleja ---
-        m4_1 = TrafficManagerAgent("Manager4.1", self, green_time=40)
-        m4_2 = TrafficManagerAgent("Manager4.2", self, green_time=40)
-        m4_3 = TrafficManagerAgent("Manager4.3", self, green_time=40)
-        m4_4 = TrafficManagerAgent("Manager4.4", self, green_time=60) # Ejemplo de tiempo diferente
-        m4_1.set_next(m4_2); m4_2.set_next(m4_3); m4_3.set_next(m4_4); m4_4.set_next(m4_1)
+        m4_1 = TrafficManagerAgent("Manager4.1", self, green_time=20)
+        m4_2 = TrafficManagerAgent("Manager4.2", self, green_time=20)
+        m4_1.set_next(m4_2); m4_2.set_next(m4_1);
         m4_1.activate()
         
         # Registrar todos los managers para que corra su reloj interno
-        self.agents_list.extend([m1_1, m1_2, m1_3, m2_1, m2_2, m3_1, m3_2, m4_1, m4_2, m4_3, m4_4])
+        self.agents_list.extend([m1_1, m1_2, m2_1, m2_2, m3_1, m3_2, m4_1, m4_2])
         
         # ===================================================
         #       2. SEMÁFOROS FÍSICOS (LUCES)
         # ===================================================
         light_position = [
             # Grupo 1
-            (0, 3, m1_1), (1, 3, m1_1), (2, 4, m1_2), (2, 5, m1_2), (2, 8, m1_3), (2, 9, m1_3),
+            (0, 3, m1_1), (1, 3, m1_1), (2, 4, m1_2), (2, 5, m1_2), (2, 8, m1_2), (2, 9, m1_2),
             # Grupo 2
             (7, 23, m2_1), (7, 24, m2_1), (8, 22, m2_2), (9, 22, m2_2),
+            (16, 23, m2_1), (16, 24, m2_1), (17, 22, m2_2), (18, 22, m2_2),
             # Grupo 3
             (11, 2, m3_1), (12, 2, m3_1), (13, 0, m3_2), (13, 1, m3_2),
             # Grupo 4
-            (8, 7, m4_1), (9, 7, m4_1), (13, 8, m4_2), (13, 9, m4_2), 
-            (11, 13, m4_3), (12, 13, m4_3), (7, 11, m4_4), (7, 12, m4_4)
+            (22, 4, m4_1), (22, 5, m4_1), (22, 11, m4_1), (22, 12, m4_1),
+            (23, 6, m4_2), (24, 6, m4_2), (23, 13, m4_2), (24, 13, m4_2),
         ]
         
         for (x, y, manager) in light_position:
@@ -96,7 +94,8 @@ class TrafficModel(Model):
         self.parking_spots = {
              1: (21, 2), 2: (22, 16), 3: (15, 22), 4: (4, 22),   
              5: (21, 22), 6: (13, 19), 7: (20, 13), 8: (3, 13),
-             9: (3, 3), 10: (7, 6), 11: (14, 3), 12: (15, 6), 13: (20, 7) 
+             9: (3, 3), 10: (7, 6), 11: (14, 3), 12: (15, 6), 13: (20, 7),
+             14: (6, 15), 15: (6, 18), 16: (15, 15), 17: (19, 20)
         }
         
         # Inicializamos historial de uso
@@ -241,19 +240,22 @@ class TrafficModel(Model):
         # ---------------------------------------------------
         # 2. ROTONDA CENTRAL (Hub)
         # ---------------------------------------------------
-        add_line((12, 8), (8, 8), (-1, 0)) 
-        add_line((8, 8), (8, 12), (0, 1))  
-        add_line((8, 12), (12, 12), (1, 0)) 
-        add_line((12, 12), (12, 8), (0, -1)) 
+        add_line((12,8),(8,8),(-1,0))
+        add_line((8,8),(8,12),(0,1))
+        add_line((8,12),(12,12),(1,0))
+        add_line((12,12),(12,8),(0,-1))
         
-        self.graph.add_edge((8, 8), (8, 9), weight=1)   
-        self.graph.add_edge((8, 12), (9, 12), weight=1) 
-        self.graph.add_edge((12, 12), (12, 11), weight=1) 
-        self.graph.add_edge((12, 8), (11, 8), weight=1)   
-
+        self.graph.add_edge((8,8),(8,9))
+        self.graph.add_edge((8,12),(9,12))
+        self.graph.add_edge((12,12),(12,11))
+        self.graph.add_edge((12,8),(11,8))
+        
+        # --- CORRECCIÓN VISUAL: Solo el centro es ROUNDABOUT (Café) ---
+        # Los bordes (calles) se mantienen como ROAD (Gris)
         for x in range(9, 12):
             for y in range(9, 12):
                 self.city_layout[x][y] = ROUNDABOUT
+
 
         # ---------------------------------------------------
         # 3. CARRETERAS VERTICALES (Norte-Sur)
@@ -301,6 +303,68 @@ class TrafficModel(Model):
         self.graph.add_edge((9, 12), (9, 13), weight=1)
         self.graph.add_edge((7, 23), (8, 23), weight=1)
         self.graph.add_edge((8, 23), (9, 23), weight=1)
+        
+        # E. 
+        
+        add_line((4, 1), (4, 4), (0,1))
+        add_line((5, 1), (5, 4), (0,1))
+        
+        self.graph.add_edge((4, 2), (5, 3), weight=3)
+        self.graph.add_edge((5, 2), (4, 3), weight=3)
+        
+        self.graph.add_edge((6, 1), (5, 1), weight=1)
+        self.graph.add_edge((5, 1), (4, 1), weight=1)
+        self.graph.add_edge((5, 4), (4, 4), weight=1)
+        self.graph.add_edge((4, 4), (3, 4), weight=1)
+        self.graph.add_edge((4, 4), (4, 5), weight=1)
+        self.graph.add_edge((5, 4), (5, 5), weight=1)
+        
+        # F. 
+        
+        add_line((4, 6), (4, 8), (0,1))
+        add_line((5, 6), (5, 8), (0,1))
+        
+        self.graph.add_edge((4, 6), (5, 7), weight=3)
+        self.graph.add_edge((5, 6), (4, 7), weight=3)
+        
+        self.graph.add_edge((6, 5), (5, 5), weight=1)
+        self.graph.add_edge((5, 5), (4, 5), weight=1)
+        self.graph.add_edge((5, 5), (5, 6), weight=1)
+        self.graph.add_edge((4, 5), (4, 6), weight=1)
+        self.graph.add_edge((5, 8), (4, 8), weight=1)
+        self.graph.add_edge((4, 8), (3, 8), weight=1)
+        
+        
+        # G. 
+        
+        add_line((4, 17), (4, 12), (0, -1))
+        add_line((5, 17), (5, 12), (0, -1))
+        
+        self.graph.add_edge((4, 15), (5, 14), weight=3)
+        self.graph.add_edge((5, 15), (4, 14), weight=3)
+        
+        self.graph.add_edge((6, 12), (5, 12), weight=1)
+        self.graph.add_edge((5, 12), (4, 12), weight=1)
+        self.graph.add_edge((4, 17), (5, 17), weight=1)
+        self.graph.add_edge((5, 17), (6, 17), weight=1)
+        
+        # G. 
+        
+        add_line((17, 12), (17, 23), (0, 1))
+        add_line((18, 12), (18, 23), (0, 1))
+        
+        self.graph.add_edge((17, 14), (18, 15), weight=3)
+        self.graph.add_edge((18, 14), (17, 15), weight=3)
+        
+        self.graph.add_edge((17, 19), (18, 20), weight=3)
+        self.graph.add_edge((18, 19), (17, 20), weight=3)
+        
+        self.graph.add_edge((16, 12), (17, 12), weight=1)
+        self.graph.add_edge((17, 12), (18, 12), weight=1)
+        self.graph.add_edge((4, 17), (5, 17), weight=1)
+        self.graph.add_edge((5, 17), (6, 17), weight=1)
+        
+        
 
         # ---------------------------------------------------
         # 4. CARRETERAS HORIZONTALES (Este-Oeste)
@@ -329,12 +393,12 @@ class TrafficModel(Model):
         
         # C. East Road (Inbound from right to center)
         add_line((23, 4), (12, 4), (-1, 0)) 
-        add_line((23, 5), (12, 5), (-1, 0)) 
+        add_line((23, 5), (12, 5), (-1, 0))
         
         self.graph.add_edge((18, 5), (17, 4), weight=3)
         self.graph.add_edge((18, 4), (17, 5), weight=3)
-        self.graph.add_edge((12, 4), (12, 5), weight=1)
-        self.graph.add_edge((12, 5), (12, 6), weight=1) # Conexión clave
+        self.graph.add_edge((12, 5), (12, 4), weight=1)
+        self.graph.add_edge((12, 4), (12, 3), weight=1)
         self.graph.add_edge((23, 4), (22, 4), weight=1)
         self.graph.add_edge((23, 5), (22, 5), weight=1)
         
@@ -365,6 +429,28 @@ class TrafficModel(Model):
         self.graph.add_edge((12, 9), (12, 10), weight=1) 
         self.graph.add_edge((23, 8), (22, 8), weight=1)
         self.graph.add_edge((23, 9), (22, 9), weight=1)
+        
+        # F. 
+        add_line((1, 16), (8, 16), (1, 0)) 
+        add_line((1, 17), (8, 17), (1, 0)) 
+        
+        self.graph.add_edge((4, 16), (5, 17), weight=3)
+        self.graph.add_edge((4, 17), (5, 16), weight=3)
+        self.graph.add_edge((1, 15), (1, 16), weight=1)
+        self.graph.add_edge((1, 16), (1, 17), weight=1) 
+        self.graph.add_edge((8, 16), (8, 17), weight=1)
+        self.graph.add_edge((8, 17), (8, 18), weight=1)
+        
+        # G.
+        add_line((17, 16), (12, 16), (-1, 0)) 
+        add_line((18, 17), (12, 17), (-1, 0)) 
+        
+        self.graph.add_edge((16, 16), (15, 17), weight=3)
+        self.graph.add_edge((16, 17), (15, 16), weight=3)
+        self.graph.add_edge((17, 15), (17, 16), weight=1)
+        self.graph.add_edge((17, 16), (17, 17), weight=1)
+        self.graph.add_edge((12, 17), (12, 16), weight=1)
+        self.graph.add_edge((12, 16), (12, 15), weight=1)
 
         # ---------------------------------------------------
         # 5. CONEXIÓN DE ESTACIONAMIENTOS

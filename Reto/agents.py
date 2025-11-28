@@ -1,13 +1,11 @@
 from mesa import Agent
 import numpy as np
+import networkx as nx
 
 PARKING = 3
 
 class TrafficManagerAgent(Agent):
-    """
-    Agente 'Cerebro' que controla el ciclo de los semáforos.
-    No tiene posición física, solo gestiona el tiempo y la sincronización.
-    """
+    """Agente Cerebro (Sin cambios)"""
     def __init__(self, unique_id, model, green_time=20, yellow_time=4):
         super().__init__(model)
         self.unique_id = unique_id
@@ -38,10 +36,7 @@ class TrafficManagerAgent(Agent):
                     self.next_manager.activate()
 
 class TrafficLightAgent(Agent):
-    """
-    Agente físico que representa la luz del semáforo en el mapa.
-    Su estado es un reflejo directo de su TrafficManager asignado.
-    """
+    """Agente Cuerpo Físico (Sin cambios)"""
     def __init__(self, unique_id, model, manager):
         super().__init__(model)
         self.unique_id = unique_id
@@ -63,8 +58,7 @@ class TrafficLightAgent(Agent):
 
 class VehicleAgent(Agent):
     """
-    Agente vehículo con lógica de navegación, evasión de obstáculos 
-    y reglas de prioridad (Derecho de Paso).
+    Agente vehículo con Cambio de Carril Inteligente (Paciencia)
     """
     def __init__(self, unique_id, model, start_node, destination_node):
         super().__init__(model)
@@ -77,139 +71,190 @@ class VehicleAgent(Agent):
         self.acceleration = 0.05
         self.path = []
         self.state = "DRIVING"
+        
+        # --- NUEVO: SISTEMA DE PACIENCIA ---
+        # Si la paciencia llega a 0, intenta cambiar de carril
+        self.max_patience = 5  # Pasos de tolerancia antes de desesperarse
+        self.patience = self.max_patience
 
-    def step(self):
-        if self.state == "ARRIVED":
+    def try_change_lane(self):
+        """
+        Intenta buscar un nodo adyacente (carril lateral) que esté libre
+        y que permita llegar al destino.
+        """
+        current_node = self.get_current_grid_pos()
+        if current_node not in self.model.graph:
             return
 
-        # --- Contexto: ¿Estoy en un estacionamiento? ---
+        # Obtenemos los vecinos conectados en el grafo (posibles movimientos legales)
+        # Nota: Esto incluye el nodo de adelante y los de los lados si hay conexión
+        neighbors = list(self.model.graph.neighbors(current_node))
+        
+        # El nodo al que íbamos originalmente
+        original_next_step = self.path[0] if self.path else None
+
+        for neighbor in neighbors:
+            # 1. No queremos ir al mismo lugar donde estamos bloqueados
+            if neighbor == original_next_step:
+                continue
+            
+            # 2. Verificar si el carril de al lado está físicamente libre
+            # Usamos un radio pequeño para ver si la celda lateral está vacía
+            cell_contents = self.model.space.get_neighbors(neighbor, radius=0.2, include_center=True)
+            is_free = True
+            for obj in cell_contents:
+                if isinstance(obj, VehicleAgent):
+                    is_free = False
+                    break
+            
+            if is_free:
+                # 3. ¿Ese carril me lleva a mi destino? (Recálculo de ruta)
+                try:
+                    # Calculamos nueva ruta desde el vecino
+                    new_path = nx.shortest_path(self.model.graph, neighbor, self.destination, weight='weight')
+                    
+                    # 4. ÉXITO: Cambiamos de plan
+                    self.path = [(x + 0.5, y + 0.5) for x, y in new_path]
+                    # Reiniciamos paciencia
+                    self.patience = self.max_patience
+                    # Pequeña penalización de velocidad al cambiar de carril
+                    self.speed = 0.1 
+                    return # Ya cambiamos, salimos de la función
+                    
+                except nx.NetworkXNoPath:
+                    continue
+
+    def get_current_grid_pos(self):
+        """Devuelve la posición entera (nodo del grafo) más cercana"""
+        return (int(round(self.pos[0]-0.5)), int(round(self.pos[1]-0.5)))
+
+    def step(self):
+        if self.state == "ARRIVED": return
+
+        # --- GESTIÓN DE PACIENCIA ---
+        if self.speed < 0.1:
+            self.patience -= 1
+        else:
+            self.patience = self.max_patience
+
+        # Si se acabó la paciencia, intentamos cambiar de carril
+        if self.patience <= 0:
+            self.try_change_lane()
+
+        # --- DATOS DE NAVEGACIÓN ---
+        current_pos = np.array(self.pos)
+        next_pos = self.path[0] if self.path else None
+        
+        if next_pos is None: return
+
+        # Vector de dirección
+        my_dx = next_pos[0] - current_pos[0]
+        my_dy = next_pos[1] - current_pos[1]
+        
+        norm = np.linalg.norm([my_dx, my_dy])
+        dir_vector = np.array([my_dx, my_dy]) / (norm if norm > 0 else 1)
+
+        # --- CONTEXTO ---
         cx, cy = int(self.pos[0]), int(self.pos[1])
         is_in_parking = False
         if 0 <= cx < len(self.model.city_layout) and 0 <= cy < len(self.model.city_layout[0]):
             if self.model.city_layout[cx][cy] == PARKING:
                 is_in_parking = True
 
-        # 1. Percepción: Radio amplio (5.0) para anticipar tráfico rápido
-        neighbors = self.model.space.get_neighbors(self.pos, radius=5.0, include_center=False)
+        # Escaneo
+        neighbors = self.model.space.get_neighbors(self.pos, radius=3.5, include_center=False)
         
         obstacle_ahead = False
         emergency_brake = False
         traffic_light = None
         
-        next_step_pos = self.path[0] if self.path else None
-        current_pos = np.array(self.pos)
-        
+        blocking_car_distance = 999.9
+
         for agent in neighbors:
-            # --- Detección de Vehículos ---
+            # --- COCHES ---
             if isinstance(agent, VehicleAgent):
                 if agent.state == "ARRIVED": continue
 
-                # Verificar si el otro vehículo está en estacionamiento
-                ox, oy = int(agent.pos[0]), int(agent.pos[1])
-                other_in_parking = False
-                if 0 <= ox < len(self.model.city_layout) and 0 <= oy < len(self.model.city_layout[0]):
-                    if self.model.city_layout[ox][oy] == PARKING:
-                        other_in_parking = True
-
-                # Regla 1: Prioridad de Avenida
-                # Si yo voy por la calle y el otro está en parking, lo ignoro.
-                if not is_in_parking and other_in_parking:
-                    continue 
-
                 other_pos = np.array(agent.pos)
-                dist = np.linalg.norm(other_pos - current_pos)
+                vec_to_other = other_pos - current_pos
+                dist = np.linalg.norm(vec_to_other)
+
+                # FILTRO DE ÁNGULO
+                angle_match = np.dot(dir_vector, vec_to_other / (dist + 0.0001))
                 
-                # Regla 2: Salida segura del estacionamiento
-                if is_in_parking and not other_in_parking:
-                    # Si está lejos (> 4.5), salir.
-                    if dist > 4.5:
-                        continue
-                        
-                    # Si está cerca, verificar si se acerca o se aleja
-                    other_next_step = agent.path[0] if agent.path else None
-                    is_approaching = True 
+                if angle_match > 0.7:
+                    if dist < blocking_car_distance:
+                        blocking_car_distance = dist
                     
-                    if other_next_step is not None:
-                        dist_now = dist
-                        dist_future = np.linalg.norm(np.array(other_next_step) - current_pos)
-                        # Si la distancia futura es mayor o igual, el coche ya pasó.
-                        if dist_future >= dist_now:
-                            is_approaching = False
-                    
-                    # Solo ceder el paso si el coche se está acercando peligrosamente
-                    if is_approaching:
-                        obstacle_ahead = True
-                        emergency_brake = True
-                        continue
-                    else:
-                        continue
-
-                # Regla 3: Seguimiento normal (Misma vía)
-                is_in_front = False
-                if next_step_pos is not None:
-                    my_direction = np.array(next_step_pos) - current_pos
-                    vector_to_other = other_pos - current_pos
-                    if np.dot(my_direction, vector_to_other) > 0:
-                        is_in_front = True
-
-                if is_in_front:
-                    if dist < 0.9:
+                    if dist < 0.9: 
                         emergency_brake = True
                         obstacle_ahead = True
-                    elif dist < 1.9:
+                    elif dist < 1.8: 
                         obstacle_ahead = True
-            
-            # --- Detección de Semáforos ---
+
+                # CASO ESPECIAL: SALIDA DE PARKING
+                if is_in_parking:
+                    dist_to_target = np.linalg.norm(other_pos - np.array(next_pos))
+                    if dist_to_target < 1.5: 
+                        obstacle_ahead = True
+                        emergency_brake = True
+
+            # --- SEMÁFOROS ---
             elif isinstance(agent, TrafficLightAgent):
-                # Solo obedecer si el semáforo está en mi siguiente paso inmediato
-                if next_step_pos is not None:
-                    dist_to_light = self.model.space.get_distance(agent.pos, next_step_pos)
-                    if dist_to_light < 0.1:
-                        traffic_light = agent
+                dist_light = self.model.space.get_distance(agent.pos, next_pos)
+                if dist_light < 0.1:
+                    traffic_light = agent
 
-        # --- Cálculo de Velocidad ---
+        # --- DECISIÓN ---
         target_speed = self.max_speed
         
+        light_is_red = False
         if traffic_light:
             if traffic_light.state == "RED":
                 target_speed = 0
-                self.speed = 0 
+                light_is_red = True
+                self.speed = 0
             elif traffic_light.state == "YELLOW":
                 target_speed = self.max_speed * 0.5
-        
+
         if obstacle_ahead:
             target_speed = 0
             self.state = "BRAKING"
             if emergency_brake:
-                self.speed = 0 
+                self.speed = 0
         
-        # Física de movimiento
+        # --- KICKSTART (Anti-bloqueo) ---
+        if self.speed < 0.01 and not light_is_red:
+            if blocking_car_distance > 1.2:
+                target_speed = self.max_speed 
+                self.speed = 0.1 
+
+        # --- FÍSICA ---
         if target_speed > self.speed:
             self.speed += self.acceleration
         elif target_speed < self.speed:
             self.speed -= self.acceleration
             
-        if self.speed < 0: 
-            self.speed = 0
+        if self.speed < 0: self.speed = 0
 
     def advance(self):
-        if self.state == "ARRIVED":
-            return
+        if self.state == "ARRIVED": return
 
         if self.speed > 0 and self.path:
             target = self.path[0]
             current = np.array(self.pos)
-            direction = np.array(target) - current
-            dist = np.linalg.norm(direction)
             
-            if dist < self.speed:
+            vec_to_target = np.array(target) - current
+            dist_to_target = np.linalg.norm(vec_to_target)
+            
+            if dist_to_target < self.speed:
                 new_pos = target
                 self.path.pop(0)
                 self.model.space.move_agent(self, tuple(new_pos))
-
                 if not self.path:
                     self.state = "ARRIVED"
                     self.model.space.remove_agent(self)
             else:
-                new_pos = current + (direction / dist) * self.speed
+                norm_dir = vec_to_target / dist_to_target
+                new_pos = current + norm_dir * self.speed
                 self.model.space.move_agent(self, tuple(new_pos))
