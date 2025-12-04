@@ -91,20 +91,18 @@ def create_city_visualization(model: TrafficModel) -> Figure:
         if isinstance(agent, VehicleAgent):
             vehicle_count += 1
             color = AGENT_COLORS["moving"]
-            if agent.speed < 0.01:
-                color = AGENT_COLORS["stopped"]
             
-            circle = patches.Circle((x, y), radius=0.35, facecolor=color, edgecolor='white', linewidth=1, zorder=15)
+            # Centrar el círculo en la celda
+            circle = patches.Circle((x + 0.5, y + 0.5), radius=0.35, facecolor=color, edgecolor='white', linewidth=1, zorder=15)
             ax.add_patch(circle)
             
         elif isinstance(agent, TrafficLightAgent):
-            # El agente físico lee el estado de su manager automáticamente aquí
             if agent.state == "GREEN": c = AGENT_COLORS["light_green"]
             elif agent.state == "YELLOW": c = AGENT_COLORS["light_yellow"]
             else: c = AGENT_COLORS["light_red"]
             
             rect = patches.Rectangle(
-                (x - 0.5, y - 0.5), 
+                (x, y), 
                 1.0, 1.0, 
                 facecolor=c, 
                 edgecolor='none', 
@@ -133,14 +131,11 @@ def StatisticsPanel():
     if model_state.value is None: return
     vehicles = [a for a in model_state.value.agents_list if isinstance(a, VehicleAgent)]
     total = len(vehicles)
-    stopped = sum(1 for v in vehicles if v.speed < 0.01)
-    avg_speed = model_state.value.get_avg_speed()
+    stopped = 0
     
     with solara.Card("Live Statistics"):
         solara.Markdown(f"**Step:** {current_step.value}")
         solara.Markdown(f"**Vehicles:** {total}")
-        solara.Markdown(f"**Stopped:** {stopped}")
-        solara.Markdown(f"**Avg Speed:** {avg_speed:.2f}")
 
 @solara.component
 def TrafficSimulation():
@@ -178,7 +173,7 @@ def TrafficSimulation():
             solara.Button("▶️ Play", color="success", on_click=lambda: is_playing.set(True), block=True)
         solara.Button("⏭️ Step +1", color="info", on_click=step_model, disabled=is_playing.value, block=True)
         solara.SliderFloat("Speed", value=play_speed, min=0.01, max=1.0, step=0.05)
-        solara.SliderInt("Vehicles", value=num_vehicles_param, min=1, max=100)
+        solara.SliderInt("Vehicles", value=num_vehicles_param, min=1, max=400)
         StatisticsPanel()
 
     with solara.Column(style={"padding": "20px", "align-items": "center"}):

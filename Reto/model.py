@@ -1,9 +1,9 @@
 import mesa
 from mesa import Model
-from mesa.space import ContinuousSpace
 from mesa.datacollection import DataCollector
 import networkx as nx
 from agents import VehicleAgent, TrafficLightAgent, TrafficManagerAgent
+from mesa.space import MultiGrid
 
 # --- CONSTANTES DE TIPOS DE CELDA ---
 BUILDING = 0
@@ -13,7 +13,7 @@ PARKING = 3
 INTERSECTION_ENTRY = 4  # <--- NUEVO TIPO
 
 class TrafficModel(Model):
-    def __init__(self, num_vehicles=100): 
+    def __init__(self, num_vehicles=400): 
         super().__init__()
         self.num_vehicles = num_vehicles 
         self.vehicles_spawned = 0        
@@ -21,7 +21,7 @@ class TrafficModel(Model):
         self.spawn_cooldown = 30 
         self.parking_schedule = {} 
         
-        self.space = ContinuousSpace(x_max=25, y_max=25, torus=False)
+        self.grid = MultiGrid(width=25, height=25, torus=False)
         self.agents_list = [] 
         self.city_layout = [[BUILDING for y in range(25)] for x in range(25)]
         self.graph = nx.DiGraph()
@@ -102,9 +102,9 @@ class TrafficModel(Model):
             (23, 6, m4_2), (24, 6, m4_2), (23, 13, m4_2), (24, 13, m4_2),
         ]
         for (x, y, manager) in light_position:
-            pos = (x + 0.5, y + 0.5)
+            pos = (x, y)
             tl_agent = TrafficLightAgent(f"TL_{x}_{y}", self, manager)
-            self.space.place_agent(tl_agent, pos)
+            self.grid.place_agent(tl_agent, pos)
             self.agents_list.append(tl_agent)
             self.traffic_lights.append(tl_agent)
 
@@ -120,8 +120,8 @@ class TrafficModel(Model):
             
         self.datacollector = DataCollector(
             model_reporters={
-                "Stopped_Cars": lambda m: sum(1 for a in m.agents_list if isinstance(a, VehicleAgent) and a.speed < 0.01),
-                "Average_Speed": lambda m: self.get_avg_speed()
+                "Total_Vehicles": lambda m: sum(1 for a in m.agents_list if isinstance(a, VehicleAgent)),
+                "Arrived": lambda m: m.vehicles_spawned - sum(1 for a in m.agents_list if isinstance(a, VehicleAgent))
             }
         )
         self.spawn_vehicles()
@@ -134,10 +134,6 @@ class TrafficModel(Model):
         #         print(f"  {node} → {successors}")
         
 
-    # --- MÉTODOS AUXILIARES (IGUAL QUE ANTES) ---
-    def get_avg_speed(self):
-        speeds = [a.speed for a in self.agents_list if isinstance(a, VehicleAgent)]
-        return sum(speeds) / len(speeds) if speeds else 0
     
     def get_nearest_node(self, pos):
         return min(self.graph.nodes, key=lambda n: (n[0]-pos[0])**2 + (n[1]-pos[1])**2)
@@ -152,7 +148,7 @@ class TrafficModel(Model):
             last_used_step = self.parking_schedule.get(pid, -999)
             if (self.step_count - last_used_step) < self.spawn_cooldown: continue 
             pos = self.parking_spots[pid]
-            cell_contents = self.space.get_neighbors(pos, radius=0.4, include_center=True)
+            cell_contents = self.grid.get_cell_list_contents([pos])
             is_free = not any(isinstance(agent, VehicleAgent) for agent in cell_contents)
             if is_free: free_spots.append(pid)
         self.random.shuffle(free_spots) 
@@ -166,9 +162,8 @@ class TrafficModel(Model):
             try:
                 path_nodes = nx.shortest_path(self.graph, start_node, dest_node, weight='weight')
                 vehicle = VehicleAgent(f"Car_{self.vehicles_spawned}", self, start_node, dest_node)
-                vehicle.path = [(x + 0.5, y + 0.5) for x, y in path_nodes]
-                spawn_pos = (start_pos[0] + 0.5, start_pos[1] + 0.5)
-                self.space.place_agent(vehicle, spawn_pos)
+                vehicle.path = list(path_nodes)
+                self.grid.place_agent(vehicle, start_pos)
                 self.agents_list.append(vehicle)
                 self.vehicles_spawned += 1
                 self.parking_schedule[start_id] = self.step_count
@@ -183,7 +178,14 @@ class TrafficModel(Model):
         for agent in self.agents_list: 
             if hasattr(agent, "advance"): agent.advance()     
         self.step_count += 1
-
+        
+        # DEBUG
+        vehicles = [a for a in self.agents_list if isinstance(a, VehicleAgent)]
+        print(f"Step {self.step_count}: {len(vehicles)} vehicles")
+        if vehicles:
+            v = vehicles[0]
+            print(f"  Vehicle 0 pos: {v.pos}, path length: {len(v.path)}, state: {v.state}")
+            
     def build_city_graph(self):
         # (TU CÓDIGO DE GRAFO ORIGINAL AQUÍ - SIN CAMBIOS)
         # Mantén todo el método build_city_graph exactamente como estaba
@@ -387,8 +389,8 @@ class TrafficModel(Model):
         self.graph.add_edge((23, 11), (23, 10), weight=1)
         
         # C. East Road (Inbound from right to center)
-        add_line((23, 4), (12, 4), (-1, 0)) 
-        add_line((23, 5), (12, 5), (-1, 0))
+        add_line((12, 4), (23, 4), (1, 0)) 
+        add_line((12, 5), (23, 5), (1, 0))
         
         self.graph.add_edge((18, 5), (17, 4), weight=3)
         self.graph.add_edge((18, 4), (17, 5), weight=3)
